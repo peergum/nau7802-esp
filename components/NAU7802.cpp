@@ -22,20 +22,33 @@ NAU7802::~NAU7802() {}
 bool NAU7802::init() {
   /* Check for NAU7802 revision register (0x1F), low nibble should be 0xF. */
   uint8_t value;
-  if (!readRegister(NAU7802_REVISION_ID, &value) || (value & 0xF) != 0xF) {
+  if (!enable(true)) {
+    ESP_LOGE(TAG, "Can't wakeup sensor");
+  }
+  if (!reset()) {
+    ESP_LOGE(TAG, "Can't reset sensor");
     return false;
   }
-
-  if (!reset())
+  if (!enable(true)) {
+    ESP_LOGE(TAG, "Can't enable sensor");
     return false;
-  if (!enable(true))
+  }
+  if (!readRegister(NAU7802_REVISION_ID, &value) || (value & 0xF) != 0xF) {
+    ESP_LOGE(TAG, "Wrong sensor");
     return false;
-  if (!setLDO(NAU7802_3V0))
+  }
+  if (!setLDO(NAU7802_3V0)) {
+    ESP_LOGE(TAG, "Can't set sensor voltage");
     return false;
-  if (!setGain(NAU7802_GAIN_128))
+  }
+  if (!setGain(NAU7802_GAIN_128)) {
+    ESP_LOGE(TAG, "Can't set sensor gain");
     return false;
-  if (!setRate(NAU7802_RATE_10SPS))
+  }
+  if (!setRate(NAU7802_RATE_40SPS)) {
+    ESP_LOGE(TAG, "Can't set sensor rate");
     return false;
+  }
 
   // disable ADC chopper clock
   if (!readRegister(NAU7802_ADC, &value) ||
@@ -66,8 +79,8 @@ bool NAU7802::init() {
 */
 /**************************************************************************/
 bool NAU7802::enable(bool flag) {
-  uint8_t value;
-  if (!readRegister(NAU7802_PU_CTRL, &value)) {
+  uint8_t value = 0;
+  if (!readRegister(NAU7802_PU_CTRL, &value) && !flag) {
     ESP_LOGE(TAG, "Enable - NAU7802_PU_CTRL = %02x", value);
     return false;
   }
@@ -104,7 +117,7 @@ bool NAU7802::enable(bool flag) {
 bool NAU7802::available(void) {
   uint8_t value;
   return (readRegister(NAU7802_PU_CTRL, &value) &&
-          ((value & (1 << 5)) == 1)); // available==1
+          (value & (1<<5))); // available==1
 }
 
 /**************************************************************************/
@@ -115,6 +128,7 @@ bool NAU7802::available(void) {
 /**************************************************************************/
 int32_t NAU7802::read(void) {
   uint32_t value = 0;
+
   readADC(&value);
   // extend sign bit
   if (value & 0x800000) {
@@ -301,7 +315,7 @@ bool NAU7802::readRegister(uint8_t regAddress, uint8_t *value) {
   *value = 0;
   esp_err_t err = i2c_master_write_read_device(i2cPort, i2cAddress, &regAddress,
                                                1, value, 1, I2C_WAIT_MS);
-  ESP_LOGI(TAG, "Read 0x%02x = 0x%02x (err = %d)", regAddress, *value, err);
+  ESP_LOGD(TAG, "Read 0x%02x = 0x%02x (err = %d)", regAddress, *value, err);
   return (ESP_OK == err);
 }
 
@@ -317,7 +331,7 @@ bool NAU7802::writeRegister(uint8_t regAddress, uint8_t value) {
   uint8_t tx[2] = {regAddress, value};
   esp_err_t err =
       i2c_master_write_to_device(i2cPort, i2cAddress, tx, 2, I2C_WAIT_MS);
-  ESP_LOGI(TAG, "Write 0x%02x <- 0x%02x (err = %d)", regAddress, value, err);
+  ESP_LOGD(TAG, "Write 0x%02x <- 0x%02x (err = %d)", regAddress, value, err);
 
   return (ESP_OK == err);
 }
@@ -332,15 +346,16 @@ bool NAU7802::writeRegister(uint8_t regAddress, uint8_t value) {
  */
 bool NAU7802::readADC(uint32_t *value) {
   uint8_t buffer[3];
+  uint8_t regAddress = NAU7802_ADCO_B2;
   esp_err_t err =
-      i2c_master_read_from_device(i2cPort, i2cAddress, buffer, 3, I2C_WAIT_MS);
+      i2c_master_write_read_device(i2cPort, i2cAddress, &regAddress, 1, buffer, 3, I2C_WAIT_MS);
   if (ESP_OK != err) {
     ESP_LOGE(TAG, "ReadADC err = %d", err);
     return false;
   }
   *value = ((uint32_t)buffer[0] << 16) | ((uint32_t)buffer[1] << 8) |
            ((uint32_t)buffer[2]);
-  ESP_LOGI(TAG, "ReadADC = %u", *value);
+  ESP_LOGD(TAG, "ReadADC = %u", *value);
   return true;
 }
 
